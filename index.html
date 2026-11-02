@@ -247,7 +247,7 @@ if('serviceWorker' in navigator && !(window.google&&google.script) && /github\.i
 // puis se met à jour dès que le serveur répond. Le serveur reste la seule référence.
 const snapKey = () => 'ra.data.'+S.me;
 function saveSnap(d){ try{ if(S.me&&d&&d.user&&d.user.nom===S.me) store.set(snapKey(), JSON.stringify(d)); }catch(e){} }
-function apply(d){ saveSnap(d); S.rooms=d.rooms; S.types=d.roomTypes||{}; S.dests=d.destinations||{}; S.lots=d.lots||[]; S.cycles=d.cycles; S.entries=d.entries; S.srvToday=d.today; S.role=d.user.role; S.loaded=true; $('who-name').textContent=S.me+(S.role==='admin'?' · admin':''); render(); }
+function apply(d){ saveSnap(d); S.rooms=d.rooms; S.types=d.roomTypes||{}; S.dests=d.destinations||{}; S.lots=d.lots||[]; S.cycles=d.cycles; S.entries=withQueued(d.entries); S.srvToday=d.today; S.role=d.user.role; S.loaded=true; $('who-name').textContent=S.me+(S.role==='admin'?' · admin':''); render(); }
 let revision = 0, refreshing = false, pendingVisual = null, deferredReports = new Set(), reportRunning = false;
 function mergeEntries(es){ es.forEach(e=>{const i=S.entries.findIndex(x=>x.id===e.id); if(i<0) S.entries.push(e); else S.entries[i]=e;}); }
 function updateSaveButton(){
@@ -275,6 +275,67 @@ async function drainReports(){
   catch(e){/* The automatic trigger retries durable pending rows. */}
   finally{reportRunning=false; if(deferredReports.size) reportLater.timer=setTimeout(drainReports,4000);}
 }
+/* ---------- envoi en arrière-plan des saisies ----------
+   Une saisie est affichée et comptée aussitôt, puis gardée sur le téléphone (file d'envoi)
+   jusqu'à ce que le serveur la confirme. Chaque saisie a un identifiant unique : renvoyée
+   plusieurs fois (réseau lent, app fermée puis rouverte), elle n'est enregistrée qu'une fois. */
+const qKey = () => 'ra.outbox.'+S.me;
+function qGet(){ try{ const q=JSON.parse(store.get(qKey())||'[]'); return Array.isArray(q)?q:[]; }catch(e){ return []; } }
+function qSet(q){ store.set(qKey(), q.length?JSON.stringify(q):null); }
+const tmpId = it => 'att-'+it.id;
+function queuedEntry(it){ return {id:tmpId(it), roomId:it.room, date:it.date, liters:it.liters, by:S.me, at:it.at, voided:false, destination:it.dest||'', req:it.id, sync:'', syncError:'', queued:true}; }
+// Ajoute les saisies encore en file aux données du serveur ; retire de la file celles que le serveur a déjà.
+function withQueued(entries){
+  if(!S.me) return entries;
+  const known=new Set(entries.map(e=>e.req).filter(Boolean));
+  const q=qGet(), rest=q.filter(it=>!known.has(it.id));
+  if(rest.length!==q.length) qSet(rest);
+  return entries.concat(rest.map(queuedEntry));
+}
+let flushing=false, flushTimer=null, flushDelay=3000;
+function scheduleFlush(ms){ clearTimeout(flushTimer); flushTimer=setTimeout(flushOutbox, ms); }
+async function flushOutbox(){
+  if(flushing||!S.me||!S.code) return;
+  const user=S.me; let q=qGet(); if(!q.length){ flushDelay=3000; showQueueAge(); return; }
+  flushing=true;
+  try{
+    while(q.length && S.me===user){
+      const it=q[0];
+      try{
+        const d=await call('addEntry',S.me,S.code,it.room,it.date,it.liters,it.id);
+        q=qGet().filter(x=>x.id!==it.id); qSet(q);
+        S.entries=S.entries.filter(e=>e.id!==tmpId(it)); mergeEntries([d.entry]); if(d.today) S.srvToday=d.today;
+        reportLater(d.entry.id); flushDelay=3000; render();
+      }catch(e){
+        const msg=String(e&&e.message||'');
+        // Seuls les refus de contenu sont définitifs ; tout le reste (réseau, lenteur de Google, verrou, code) est réessayé.
+        if(!/Quantité invalide|Date invalide|futur|Salle inconnue|destination du lot|correspond déjà|demande invalide/i.test(msg)){
+          // Réseau ou serveur indisponible : on garde la saisie et on réessaie plus tard (3 s, 6 s, 12 s… jusqu'à 2 min).
+          flushDelay=Math.min(flushDelay*2,120000); break;
+        }
+        // Refus définitif du serveur (salle inactive, destination manquante…) : on retire la saisie et on prévient.
+        q=qGet().filter(x=>x.id!==it.id); qSet(q);
+        S.entries=S.entries.filter(e=>e.id!==tmpId(it)); render();
+        banner(`Saisie refusée (${L(it.liters)} L · ${it.room} · ${fd(it.date)}) : ${msg}`);
+      }
+    }
+  } finally {
+    flushing=false;
+    if(qGet().length) scheduleFlush(flushDelay);
+    showQueueAge();
+  }
+}
+// Discret : rien n'apparaît tant que l'envoi se fait normalement. Seulement si une saisie attend
+// depuis plus de 10 minutes (téléphone hors réseau), un rappel indique de garder l'app ouverte au réseau.
+function showQueueAge(){
+  const q=S.me?qGet():[], old=q.filter(it=>Date.now()-(it.t||0)>600000);
+  const box=$('save-feedback'); if(!box) return;
+  if(!old.length){ if(box.dataset.q){ box.hidden=true; box.dataset.q=''; } return; }
+  box.dataset.q='1'; box.hidden=false; box.className='dest warn';
+  box.textContent=`${old.length} saisie${old.length>1?'s':''} pas encore transmise${old.length>1?'s':''} au registre. Elle${old.length>1?'s':''} partira automatiquement dès que le téléphone aura du réseau : ne vous déconnectez pas de l'app d'ici là.`;
+}
+window.addEventListener('online',()=>scheduleFlush(500));
+
 function saveFeedback(state){
   const box=$('save-feedback'); box.hidden=!pendingVisual; if(!pendingVisual) return;
   box.className='dest'+(state==='uncertain'?' warn':'');
@@ -396,7 +457,7 @@ function entryRow(e){
   if(e.voided) meta.append(' · annulée par '+(e.voidedBy||'—')+' : '+(e.voidReason||''));
   if(e.sync) meta.append(' · Report au registre : '+e.sync+(e.syncError?' ('+e.syncError+')':''));
   li.append(meta);
-  if(!e.voided && (isAdmin() || (e.by===S.me && e.date===today()))){
+  if(!e.voided && !e.queued && (isAdmin() || (e.by===S.me && e.date===today()))){
     if(S.voiding===e.id){
       const f=el('form',{class:'voidform'});
       const inp=el('input',{type:'text',placeholder:'Motif (ex. erreur de quantité)',required:'',maxlength:'140'});
@@ -631,24 +692,22 @@ $('period').addEventListener('click',ev=>{ const b=ev.target.closest('button'); 
 /* ---------- saisie ---------- */
 $('in-date').value=today();
 $('in-date').addEventListener('input',renderDest);
-$('f-entry').addEventListener('submit',async ev=>{
-  ev.preventDefault(); if(!S.room||S.busy) return;
+$('f-entry').addEventListener('submit',ev=>{
+  ev.preventDefault(); if(!S.room||!S.loaded) return;
   const liters=parseFloat(String($('in-liters').value).replace(',','.')), date=$('in-date').value;
   if(!(liters>0)){ toast('Entrez une quantité supérieure à 0.'); return; }
   if(!date){ toast('Choisissez une date.'); return; }
   if(date>today()){ toast('La date ne peut pas être dans le futur.'); return; }
+  if(isLot(S.room)&&!destOf(S.room)){ toast('Indiquez la destination du lot.'); return; }
   const room=S.room, rounded=Math.round(liters*10)/10;
-  const key='ra.pending.'+S.me, fingerprint=JSON.stringify([room,date,rounded]);
-  let pending; try{pending=JSON.parse(store.get(key)||'null');}catch(e){}
-  if(!pending || pending.fingerprint!==fingerprint){
-    pending={fingerprint,id:crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2)};
-    store.set(key,JSON.stringify(pending));
-  }
-  pendingVisual={room,date,liters:rounded};
-  if(await act('addEntry',[room,date,liters,pending.id],`${L(rounded)} L enregistrés · ${room}`)){
-    store.set(key,null); $('in-liters').value=''; $('in-date').value=today(); renderDest();
-  }
-  updateSaveButton();
+  const id=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
+  const n=new Date(), at=today()+' '+String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')+':'+String(n.getSeconds()).padStart(2,'0');
+  const it={id,room,date,liters:rounded,at,t:Date.now(),dest:isLot(room)?destOf(room):''};
+  qSet(qGet().concat([it]));
+  S.entries.push(queuedEntry(it));
+  $('in-liters').value=''; $('in-date').value=today(); renderDest(); render();
+  toast(`${L(rounded)} L enregistrés · ${room}`);
+  revision++; scheduleFlush(0);
 });
 $('f-cycle').addEventListener('submit',async ev=>{
   ev.preventDefault(); const start=$('c-start').value; if(!start||!S.room) return;
@@ -668,7 +727,7 @@ $('f-login').addEventListener('submit',async ev=>{
   ev.preventDefault(); const nom=$('l-name').value, code=$('l-code').value.trim();
   if(!nom||!code){ toast('Choisissez votre nom et entrez votre code.'); return; }
   $('btn-login').disabled=true;
-  try{ const d=await call('getData',nom,code); S.me=d.user.nom; S.code=code; store.set('ra.me',S.me); store.set('ra.code',code); store.set('ra.lastname',S.me); banner(''); showApp(); apply(d); }
+  try{ const d=await call('getData',nom,code); S.me=d.user.nom; S.code=code; store.set('ra.me',S.me); store.set('ra.code',code); store.set('ra.lastname',S.me); banner(''); showApp(); apply(d); scheduleFlush(300); }
   catch(e){ toast(e.message||'Connexion impossible.'); }
   finally{ $('btn-login').disabled=false; }
 });
@@ -677,7 +736,8 @@ $('f-login').addEventListener('submit',async ev=>{
 const savedMe=store.get('ra.me'), savedCode=store.get('ra.code');
 if(savedMe && savedCode){ S.me=savedMe; S.code=savedCode; let snap=null; try{ snap=JSON.parse(store.get(snapKey())||'null'); }catch(e){}
   showApp(); if(snap&&snap.user&&snap.user.nom===S.me){ try{ apply(snap); }catch(e){} } refresh(); } else loadNames();
-document.addEventListener('visibilitychange',()=>{ if(!document.hidden) refresh(); });
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ refresh(); scheduleFlush(300); } });
+if(S.me) scheduleFlush(500);
 setInterval(()=>{ if(!document.hidden) refresh(); }, 60000);
 })();
 </script>
