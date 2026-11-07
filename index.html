@@ -85,6 +85,11 @@ ul.list .d{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem;
 ul.list .v{font-family:var(--f-display);font-size:1.2rem;font-weight:600;text-align:right}
 ul.list .meta{grid-column:1/-1;font-size:.8rem;color:var(--muted)}
 ul.list li.voided .v,ul.list li.voided .d{color:var(--void);text-decoration:line-through}
+/* Saisies : glisser vers la gauche pour faire apparaître « Annuler » */
+ul.list li.entry{display:block;padding:0;position:relative;overflow:hidden}
+ul.list li.entry .row{display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;align-items:center;padding:10px 0;background:var(--surface);position:relative;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+ul.list li.entry .swipe-act{position:absolute;right:0;top:0;bottom:0;width:96px;border:0;border-radius:0;background:var(--warn);color:#fff;font-weight:600;font-size:.9rem}
+ul.list li.entry .voidform{padding:0 0 10px}
 .voidform{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
 .voidform input{flex:1 1 180px}
 .cycles{display:flex;flex-direction:column;gap:8px}
@@ -448,26 +453,52 @@ function renderLot(){
   box.append(f);
 }
 
+let openSwipe=null;   // une seule ligne ouverte à la fois
+function attachSwipe(li,row){
+  const W=96; let x0=null,y0=0,dx=0,drag=false,open=false;
+  const set=(x,anim)=>{ row.style.transition=anim?'transform .2s ease':'none'; row.style.transform=x?`translateX(${x}px)`:''; };
+  const close=()=>{ open=false; set(0,true); if(openSwipe===close) openSwipe=null; };
+  row.addEventListener('pointerdown',ev=>{ if(ev.button>0) return; x0=ev.clientX; y0=ev.clientY; dx=open?-W:0; drag=false; });
+  row.addEventListener('pointermove',ev=>{
+    if(x0===null) return; const mx=ev.clientX-x0, my=ev.clientY-y0;
+    if(!drag){
+      if(Math.abs(mx)>10 && Math.abs(mx)>Math.abs(my)){ drag=true; try{row.setPointerCapture(ev.pointerId);}catch(e){} }
+      else if(Math.abs(my)>10){ x0=null; return; } else return;
+    }
+    dx=Math.max(-W-24,Math.min(0,mx+(open?-W:0))); set(dx,false);
+  });
+  const end=()=>{
+    if(x0===null) return; x0=null;
+    if(!drag){ if(open) close(); return; }
+    if(dx<-W/2){ if(openSwipe&&openSwipe!==close) openSwipe(); open=true; openSwipe=close; set(-W,true); } else close();
+  };
+  row.addEventListener('pointerup',end); row.addEventListener('pointercancel',end);
+}
 function entryRow(e){
-  const li=el('li',{class:e.voided?'voided':''});
-  li.append(el('span',{class:'d',text:fd(e.date)}));
-  li.append(el('span',{class:'muted',style:'font-size:.85rem',text: e.voided?'Annulée':(isCont(e.roomId)||cycleFor(e.roomId,e.date)?'':'Hors cycle')}));
-  li.append(el('span',{class:'v num',text:L(+e.liters)+' L'}));
-  const meta=el('span',{class:'meta',text:(e.destination?'Lot : '+e.destination+' · ':'')+'Saisi par '+(e.by||'—')+' · '+(e.at||'').slice(0,16)});
+  const can=!e.voided && !e.queued && (isAdmin() || (e.by===S.me && e.date===today()));
+  const li=el('li',{class:'entry'+(e.voided?' voided':'')});
+  const row=el('div',{class:'row'});
+  row.append(el('span',{class:'d',text:fd(e.date)}));
+  row.append(el('span',{class:'muted',style:'font-size:.85rem',text: e.voided?'Annulée':(isCont(e.roomId)||cycleFor(e.roomId,e.date)?'':'Hors cycle')}));
+  row.append(el('span',{class:'v num',text:L(+e.liters)+' L'}));
+  // L'heure de saisie reste conservée dans la feuille (traçabilité) ; elle n'est plus affichée.
+  const meta=el('span',{class:'meta',text:(e.destination?'Lot : '+e.destination+' · ':'')+'Saisi par '+(e.by||'—')});
   if(e.voided) meta.append(' · annulée par '+(e.voidedBy||'—')+' : '+(e.voidReason||''));
-  if(e.sync) meta.append(' · Report au registre : '+e.sync+(e.syncError?' ('+e.syncError+')':''));
-  li.append(meta);
-  if(!e.voided && !e.queued && (isAdmin() || (e.by===S.me && e.date===today()))){
-    if(S.voiding===e.id){
+  if(e.sync && e.sync!=='confirmé') meta.append(' · Report au registre : '+e.sync+(e.syncError?' ('+e.syncError+')':''));
+  row.append(meta);
+  if(can){
+    if(S.voiding!==e.id){
+      li.append(el('button',{type:'button',class:'swipe-act',text:'Annuler','aria-label':'Annuler cette saisie',onclick:()=>{openSwipe=null;S.voiding=e.id;render();}}));
+      li.append(row); attachSwipe(li,row);
+    } else {
+      li.append(row);
       const f=el('form',{class:'voidform'});
       const inp=el('input',{type:'text',placeholder:'Motif (ex. erreur de quantité)',required:'',maxlength:'140'});
       f.append(inp, el('button',{class:'btn small danger',type:'submit',text:'Confirmer l\'annulation'}), el('button',{class:'btn small',type:'button',text:'Garder',onclick:()=>{S.voiding=null;render();}}));
       f.addEventListener('submit',ev=>{ev.preventDefault(); const m=inp.value.trim(); if(!m){toast('Indiquez le motif.');return;} S.voiding=null; act('voidEntry',[e.id,m,true],'Saisie annulée (conservée dans l’historique)');});
       li.append(f); setTimeout(()=>inp.focus(),0);
-    } else {
-      meta.append(' · ', el('button',{type:'button',class:'link',style:'font-size:.8rem;font-weight:500',text:'Annuler',onclick:()=>{S.voiding=e.id;render();}}));
     }
-  }
+  } else li.append(row);
   return li;
 }
 const byRecent = (a,b)=>b.date.localeCompare(a.date)||String(b.at).localeCompare(String(a.at));
