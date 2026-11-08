@@ -441,15 +441,22 @@ function renderLot(){
   box.className='dest warn';
   const sel=el('select',{id:'lot-room','aria-label':'Salle de destination'});
   S.rooms.filter(r=>!isCont(r)).forEach(r=>sel.append(el('option',{value:r,text:r})));
-  const rnd=el('input',{id:'lot-round',type:'number',inputmode:'numeric',min:'1',placeholder:'Round','aria-label':'Numéro de round',style:'max-width:110px'});
+  const rnd=el('input',{id:'lot-round',type:'number',inputmode:'numeric',min:'1',placeholder:'Round','aria-label':'Numéro de round',style:'flex:0 0 96px;min-width:96px;max-width:110px'});
   const m=/^(.*?)\s+–\s+round\s+(\d+)$/i.exec(cur||''); if(m){ sel.value=m[1]; rnd.value=m[2]; }
   const f=el('form',{style:'display:flex;flex-direction:column;gap:8px'});
   const fix=S.editDest==='fix'&&cur;
-  f.append(el('span',{text:fix?'Corrigez la destination du lot en cours (les saisies du lot et le registre seront mis à jour).':cur?'Nouveau lot à partir d’aujourd’hui : choisissez sa destination.':'Indiquez la destination du lot présent dans cette salle.'}),
-    el('div',{class:'inline'},[sel,rnd,el('button',{class:'btn small',type:'submit',text:'Enregistrer'})]));
+  // Date de mise en pots du nouveau lot (par défaut aujourd'hui ; on peut l'inscrire après coup).
+  const lot0=curLot(S.room);
+  const deb=el('input',{type:'date','aria-label':'Date de mise en pots',max:today(),style:'max-width:170px'}); deb.value=today();
+  if(lot0) deb.min=addDays(lot0.start,1);
+  f.append(el('span',{text:fix?'Corrigez la destination du lot en cours (les saisies du lot et le registre seront mis à jour).':cur?'Nouveau lot : choisissez sa destination et la date de mise en pots.':'Indiquez la destination du lot présent dans cette salle.'}),
+    el('div',{class:'inline'},[sel,rnd]));
+  if(!fix && cur) f.append(el('div',{class:'inline'},[el('span',{class:'label',text:'Mis en pots le'}),deb]));
+  f.append(el('button',{class:'btn small',type:'submit',text:'Enregistrer',style:'align-self:flex-start'}));
   if(cur) f.append(el('button',{type:'button',class:'link',style:'align-self:flex-start;font-size:.85rem',text:'Annuler',onclick:()=>{S.editDest=false;render();}}));
   f.addEventListener('submit',async ev=>{ev.preventDefault(); const n=parseInt(rnd.value,10); if(!(n>0)){toast('Indiquez le numéro de round.');return;}
-    if(await act('setDestination',[S.room,`${sel.value} – round ${n}`,fix?'corriger':'nouveau'],fix?'Destination corrigée':'Lot enregistré')) S.editDest=false; render();});
+    const d0=(!fix&&cur)?deb.value:''; if(d0&&(d0>today()||(lot0&&d0<=lot0.start))){toast('Date de mise en pots invalide.');return;}
+    if(await act('setDestination',[S.room,`${sel.value} – round ${n}`,fix?'corriger':'nouveau',d0],fix?'Destination corrigée':'Lot enregistré')) S.editDest=false; render();});
   box.append(f);
 }
 
