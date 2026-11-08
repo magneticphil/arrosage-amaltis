@@ -1,7 +1,7 @@
 /* Registre d'arrosage — Amaltis : l'écran s'ouvre même sans réseau.
    Réseau d'abord (toujours la dernière version publiée) ; après 4 s ou en cas de coupure, la copie gardée sur le téléphone.
    Les données ne passent jamais par ici : elles viennent du script Google à chaque ouverture. */
-const CACHE = 'arrosage-v5';
+const CACHE = 'arrosage-v6';
 const FICHIERS = ['./', './index.html', './manifest.webmanifest', './icone-180.png', './icone-192.png', './icone-512.png'];
 
 self.addEventListener('install', e => {
@@ -14,7 +14,8 @@ self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== self.location.origin) return;  // le script Google n'est jamais intercepté
   const copie = () => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match('./index.html'));
-  const reseau = fetch(e.request).then(r => {
+  // no-cache : on revérifie toujours auprès de GitHub (sinon le navigateur peut garder 10 min une ancienne version).
+  const reseau = fetch(u.href, { cache: 'no-cache', credentials: 'same-origin' }).then(r => {
     if (r.ok) { const c = r.clone(); caches.open(CACHE).then(ca => ca.put(e.request, c)); }
     return r;
   });
