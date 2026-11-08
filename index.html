@@ -680,7 +680,7 @@ function renderRounds(){
   box.append(el('div',{style:'display:flex;flex-direction:column;gap:8px'},[
     el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap'},[el('h3',{style:'font-size:.95rem',text:'Par semaine de culture'}),pick]),
     tb,
-    el('p',{class:'muted',style:'margin:0;font-size:.8rem',text:'Semaines lues dans le registre de culture (colonne Label) ; une date de floraison modifiée dans le registre est prise en compte en quelques minutes. Écarts calculés sur la moyenne en L/j.'+(R.length<2?' La comparaison apparaîtra dès qu’un deuxième round aura des saisies dans l’application.':'')})]));
+    isAdmin() ? el('p',{class:'muted',style:'margin:0;font-size:.8rem',text:'Semaines lues dans le registre de culture (colonne Label) ; une date de floraison modifiée dans le registre est prise en compte en quelques minutes. Écarts calculés sur la moyenne en L/j.'+(R.length<2?' La comparaison apparaîtra dès qu’un deuxième round aura des saisies dans l’application.':'')}) : null]));
 }
 
 function renderSync(){
