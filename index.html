@@ -513,7 +513,7 @@ const byRecent = (a,b)=>b.date.localeCompare(a.date)||String(b.at).localeCompare
 function renderRecent(){
   const ul=$('recent'); ul.replaceChildren();
   $('recent-room').textContent = S.room ? '· '+S.room : '';
-  const es=S.entries.filter(e=>e.roomId===S.room).sort(byRecent).slice(0,8);
+  const es=S.entries.filter(e=>e.roomId===S.room&&!e.voided).sort(byRecent).slice(0,8);   // annulées : seulement dans la feuille
   if(!es.length){ ul.append(el('li',{class:'empty',style:'display:block',text:S.loaded?'Aucune saisie pour cette salle. Entrez la quantité ci-dessus puis touchez Enregistrer.':'Chargement…'})); return; }
   es.forEach(e=>ul.append(entryRow(e)));
 }
@@ -522,7 +522,7 @@ function renderHist(){
   const box=$('hist'); box.replaceChildren();
   const t=today();
   const from = S.period==='all' ? '0000-00-00' : addDays(t,-(parseInt(S.period,10)-1));
-  const es=S.entries.filter(e=>e.roomId===S.room && e.date>=from).sort(byRecent);
+  const es=S.entries.filter(e=>e.roomId===S.room && e.date>=from && !e.voided).sort(byRecent);
   const total=es.filter(e=>!e.voided).reduce((s,e)=>s+(+e.liters||0),0);
   $('h-total').textContent = S.room ? `${S.room} · ${L(total)} L` : '';
   if(!S.room){ box.append(el('div',{class:'empty',text:'Choisissez une salle.'})); return; }
@@ -533,7 +533,7 @@ function renderHist(){
     const rel = d===t?"Aujourd'hui":(d===addDays(t,-1)?'Hier':'');
     const dn=el('span',{class:'dn',text:okDate(d)?dlong.format(new Date(toUTC(d))):d}); if(rel) dn.append(el('small',{text:rel}));
     const ul=el('ul');
-    list.forEach(e=>ul.append(el('li',{class:e.voided?'voided':''},[el('span',{text:[hm(e.at),e.by||'—',e.voided?'annulée':''].filter(Boolean).join(' · ')}),el('b',{text:L(+e.liters)+' L'})])));
+    list.forEach(e=>ul.append(el('li',{},[el('span',{text:e.by||'—'}),el('b',{text:L(+e.liters)+' L'})])));
     box.append(el('div',{class:'day'},[el('div',{class:'dayhead'},[dn,el('span',{class:'dt num',text:L(dt)+' L'})]),ul]));
   });
 }
@@ -606,7 +606,7 @@ function renderBilan(){
       body.append(el('div',{class:'chart'},chartSVG(c,st)));
       if(c.end && c.end<t) body.append(el('div',{class:'proj'},[el('span',{class:'label',text:'Total final du cycle'}),el('b',{class:'num',text:L(st.total)+' L'})]));
       const list=el('ul',{class:'list'});
-      const all=entriesIn(c,true).sort(byRecent);
+      const all=entriesIn(c,false).sort(byRecent);
       if(!all.length) list.append(el('li',{class:'empty',style:'display:block',text:'Aucune saisie dans ce cycle.'}));
       all.forEach(e=>list.append(entryRow(e)));
       body.append(el('details',{},[el('summary',{text:`Saisies du cycle (${st.count})`}),list]));
