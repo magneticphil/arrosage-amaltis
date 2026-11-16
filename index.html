@@ -510,23 +510,28 @@ function entryRow(e){
 }
 const byRecent = (a,b)=>b.date.localeCompare(a.date)||String(b.at).localeCompare(String(a.at));
 
+// Salles par cycle : on ne montre que les arrosages du cycle en cours (les anciens restent dans le Bilan et la feuille).
+function cycleStartOf(r){ if(!r||isCont(r)) return ''; const c=cycleFor(r,today())||roomCycles(r)[0]; return c?c.start:''; }
 function renderRecent(){
   const ul=$('recent'); ul.replaceChildren();
   $('recent-room').textContent = S.room ? '· '+S.room : '';
-  const es=S.entries.filter(e=>e.roomId===S.room&&!e.voided).sort(byRecent).slice(0,8);   // annulées : seulement dans la feuille
-  if(!es.length){ ul.append(el('li',{class:'empty',style:'display:block',text:S.loaded?'Aucune saisie pour cette salle. Entrez la quantité ci-dessus puis touchez Enregistrer.':'Chargement…'})); return; }
+  const cs=cycleStartOf(S.room);
+  const es=S.entries.filter(e=>e.roomId===S.room&&!e.voided&&(!cs||e.date>=cs)).sort(byRecent).slice(0,8);   // annulées : seulement dans la feuille
+  if(!es.length){ ul.append(el('li',{class:'empty',style:'display:block',text:!S.loaded?'Chargement…':(cs?'Aucun arrosage depuis le début du cycle ('+fds(cs)+').':'Aucune saisie pour cette salle. Entrez la quantité ci-dessus puis touchez Enregistrer.')})); return; }
   es.forEach(e=>ul.append(entryRow(e)));
 }
 
 function renderHist(){
   const box=$('hist'); box.replaceChildren();
   const t=today();
-  const from = S.period==='all' ? '0000-00-00' : addDays(t,-(parseInt(S.period,10)-1));
+  const cs=cycleStartOf(S.room);
+  let from = S.period==='all' ? '0000-00-00' : addDays(t,-(parseInt(S.period,10)-1));
+  if(cs && cs>from) from=cs;
   const es=S.entries.filter(e=>e.roomId===S.room && e.date>=from && !e.voided).sort(byRecent);
   const total=es.filter(e=>!e.voided).reduce((s,e)=>s+(+e.liters||0),0);
-  $('h-total').textContent = S.room ? `${S.room} · ${L(total)} L` : '';
+  $('h-total').textContent = S.room ? `${S.room}${cs?' · cycle depuis le '+fds(cs):''} · ${L(total)} L` : '';
   if(!S.room){ box.append(el('div',{class:'empty',text:'Choisissez une salle.'})); return; }
-  if(!es.length){ box.append(el('div',{class:'empty',text:'Aucun arrosage enregistré sur cette période.'})); return; }
+  if(!es.length){ box.append(el('div',{class:'empty',text:cs&&from===cs?'Aucun arrosage depuis le début du cycle ('+fds(cs)+').':'Aucun arrosage enregistré sur cette période.'})); return; }
   const days={}; es.forEach(e=>(days[e.date]=days[e.date]||[]).push(e));
   Object.keys(days).sort().reverse().forEach(d=>{
     const list=days[d], dt=list.filter(e=>!e.voided).reduce((s,e)=>s+(+e.liters||0),0);
