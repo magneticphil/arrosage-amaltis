@@ -443,19 +443,22 @@ function renderLot(){
   S.rooms.filter(r=>!isCont(r)).forEach(r=>sel.append(el('option',{value:r,text:r})));
   const rnd=el('input',{id:'lot-round',type:'number',inputmode:'numeric',min:'1',placeholder:'Round','aria-label':'Numéro de round',style:'flex:0 0 96px;min-width:96px;max-width:110px'});
   const m=/^(.*?)\s+–\s+round\s+(\d+)$/i.exec(cur||''); if(m){ sel.value=m[1]; rnd.value=m[2]; }
+  else { const lp=curLot(S.room), mp=lp&&/^(.*?)\s+–\s+round\s+(\d+)$/i.exec(lp.destination||''); if(mp&&!cur){ sel.value=mp[1]; } }
   const f=el('form',{style:'display:flex;flex-direction:column;gap:8px'});
   const fix=S.editDest==='fix'&&cur;
   // Date de mise en pots du nouveau lot (par défaut aujourd'hui ; on peut l'inscrire après coup).
   const lot0=curLot(S.room);
   const deb=el('input',{type:'date','aria-label':'Date de mise en pots',max:today(),style:'max-width:170px'}); deb.value=today();
   if(lot0) deb.min=addDays(lot0.start,1);
-  f.append(el('span',{text:fix?'Corrigez la destination du lot en cours (les saisies du lot et le registre seront mis à jour).':cur?'Nouveau lot : choisissez sa destination et la date de mise en pots.':'Indiquez la destination du lot présent dans cette salle.'}),
+  const closed=lot0&&lot0.end&&!cur;   // lot précédent parti vers sa grande salle : on attend le prochain lot
+  f.append(el('span',{text:fix?'Corrigez la destination du lot en cours (les saisies du lot et le registre seront mis à jour).':cur?'Nouveau lot : choisissez sa destination et la date de mise en pots.':
+    closed?`Le lot ${lot0.id} est parti en ${lot0.destination} (fin le ${fds(lot0.end)}). Pour arroser les nouveaux 4 pouces, indiquez le nouveau lot : destination et date de mise en pots.`:'Indiquez la destination du lot présent dans cette salle.'}),
     el('div',{class:'inline'},[sel,rnd]));
-  if(!fix && cur) f.append(el('div',{class:'inline'},[el('span',{class:'label',text:'Mis en pots le'}),deb]));
+  if(!fix && (cur||lot0)) f.append(el('div',{class:'inline'},[el('span',{class:'label',text:'Mis en pots le'}),deb]));
   f.append(el('button',{class:'btn small',type:'submit',text:'Enregistrer',style:'align-self:flex-start'}));
   if(cur) f.append(el('button',{type:'button',class:'link',style:'align-self:flex-start;font-size:.85rem',text:'Annuler',onclick:()=>{S.editDest=false;render();}}));
   f.addEventListener('submit',async ev=>{ev.preventDefault(); const n=parseInt(rnd.value,10); if(!(n>0)){toast('Indiquez le numéro de round.');return;}
-    const d0=(!fix&&cur)?deb.value:''; if(d0&&(d0>today()||(lot0&&d0<=lot0.start))){toast('Date de mise en pots invalide.');return;}
+    const d0=(!fix&&(cur||lot0))?deb.value:''; if(d0&&(d0>today()||(lot0&&d0<=lot0.start))){toast('Date de mise en pots invalide.');return;}
     if(await act('setDestination',[S.room,`${sel.value} – round ${n}`,fix?'corriger':'nouveau',d0],fix?'Destination corrigée':'Lot enregistré')) S.editDest=false; render();});
   box.append(f);
 }
@@ -486,7 +489,7 @@ function entryRow(e){
   const li=el('li',{class:'entry'+(e.voided?' voided':'')});
   const row=el('div',{class:'row'});
   row.append(el('span',{class:'d',text:fd(e.date)}));
-  row.append(el('span',{class:'muted',style:'font-size:.85rem',text: e.voided?'Annulée':(isCont(e.roomId)||cycleFor(e.roomId,e.date)?'':'Hors cycle')}));
+  row.append(el('span',{class:'muted',style:'font-size:.85rem',text: e.voided?'Annulée':(isCont(e.roomId)?'':(!cycleFor(e.roomId,e.date)?'Hors cycle':(cycleStartOf(e.roomId)&&e.date<cycleStartOf(e.roomId)?'Cycle précédent':'')))}));
   row.append(el('span',{class:'v num',text:L(+e.liters)+' L'}));
   // L'heure de saisie reste conservée dans la feuille (traçabilité) ; elle n'est plus affichée.
   const meta=el('span',{class:'meta',text:(e.destination?'Lot : '+e.destination+' · ':'')+'Saisi par '+(e.by||'—')});
@@ -516,7 +519,7 @@ function renderRecent(){
   const ul=$('recent'); ul.replaceChildren();
   $('recent-room').textContent = S.room ? '· '+S.room : '';
   const cs=cycleStartOf(S.room);
-  const es=S.entries.filter(e=>e.roomId===S.room&&!e.voided&&(!cs||e.date>=cs)).sort(byRecent).slice(0,8);   // annulées : seulement dans la feuille
+  const t0=today(); const es=S.entries.filter(e=>e.roomId===S.room&&!e.voided&&(!cs||e.date>=cs||String(e.at||'').slice(0,10)===t0)).sort(byRecent).slice(0,8);   // une saisie faite aujourd'hui pour l'ancien round reste visible   // annulées : seulement dans la feuille
   if(!es.length){ ul.append(el('li',{class:'empty',style:'display:block',text:!S.loaded?'Chargement…':(cs?'Aucun arrosage depuis le début du cycle ('+fds(cs)+').':'Aucune saisie pour cette salle. Entrez la quantité ci-dessus puis touchez Enregistrer.')})); return; }
   es.forEach(e=>ul.append(entryRow(e)));
 }
