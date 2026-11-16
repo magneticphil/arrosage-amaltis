@@ -668,16 +668,16 @@ function renderRounds(){
     mine.forEach(e=>{lab[x.days[e.date]].l+=(+e.liters||0);});
     const total=mine.reduce((s,e)=>s+(+e.liters||0),0), elapsed=own.filter(d=>d<=t).length;
     return {n:x.n,start:own[0],end:own[own.length-1],total,elapsed,perDay:elapsed?total/elapsed:0,ongoing:own[own.length-1]>=t,lab,order,count:mine.length};
-  }).filter(x=>x.count>0);
+  }).filter(x=>x.count>0 || (x.ongoing && x.elapsed>0));   // le round en cours apparaît même avant son premier arrosage
   if(!R.length){ box.append(el('div',{class:'empty',text:'Aucune saisie dans les rounds du registre de culture.'})); return; }
   const pct=(a,b)=>b>0?(a-b)/b*100:null, fp=v=>v==null?'—':(v>0?'+':v<0?'−':'')+nf.format(Math.abs(Math.round(v)))+' %';
   const ul=el('ul',{class:'list'});
   R.slice().reverse().forEach((x,i,arr)=>{ const prev=arr[i+1];
     ul.append(el('li',{},[el('span',{class:'d',text:'Round '+x.n}),el('span',{class:'muted',style:'font-size:.85rem',text:x.ongoing?'En cours':''}),el('span',{class:'v num',text:L(x.total)+' L'}),
-      el('span',{class:'meta',text:fd(x.start)+' → '+fd(x.end)+' · '+x.elapsed+' j · '+L(x.perDay)+' L/j'+(prev?' · '+fp(pct(x.perDay,prev.perDay))+' vs round '+prev.n:'')})]));
+      el('span',{class:'meta',text:fd(x.start)+' → '+fd(x.end)+' · '+x.elapsed+' j · '+L(x.perDay)+' L/j'+(prev&&x.count&&prev.count?' · '+fp(pct(x.perDay,prev.perDay))+' vs round '+prev.n:'')})]));
   });
   box.append(el('div',{},[el('h3',{style:'margin-bottom:4px;font-size:.95rem',text:'Par round'}),ul]));
-  let sel=R.find(x=>x.n===S.roundSel[r]); if(!sel) sel=R[R.length-1];
+  let sel=R.find(x=>x.n===S.roundSel[r]); if(!sel) sel=R.find(x=>x.ongoing)||R[R.length-1];
   const prev=R[R.indexOf(sel)-1]||null;
   const pick=el('select',{'aria-label':'Round affiché',style:'max-width:180px'});
   R.slice().reverse().forEach(x=>pick.append(el('option',{value:String(x.n),text:'Round '+x.n})));
